@@ -29,19 +29,31 @@ function savePresets(presets) {
   fs.writeFileSync(PRESETS_FILE, JSON.stringify(presets, null, 2), 'utf-8');
 }
 
-function upsertPreset(title, preset) {
-  const presets = loadPresets();
-  presets[title] = preset;
-  savePresets(presets);
+function upsertPreset(userId, title, preset) {
+  const all = loadPresets();
+  if (!all[userId]) all[userId] = {};
+  all[userId][title] = preset;
+  savePresets(all);
 }
 
-function getPreset(title) {
-  const presets = loadPresets();
-  return presets[title] || null;
+function getPreset(userId, title) {
+  const all = loadPresets();
+  return all[userId]?.[title] || null;
 }
 
-function listPresetTitles() {
-  return Object.keys(loadPresets());
+function listPresetTitles(userId) {
+  const all = loadPresets();
+  return Object.keys(all[userId] || {});
+}
+
+function deletePreset(userId, title) {
+  const all = loadPresets();
+  if (all[userId] && all[userId][title]) {
+    delete all[userId][title];
+    savePresets(all);
+    return true;
+  }
+  return false;
 }
 
 module.exports = {
@@ -50,6 +62,7 @@ module.exports = {
   upsertPreset,
   getPreset,
   listPresetTitles,
+  deletePreset,
   PRESETS_FILE,
 };
 

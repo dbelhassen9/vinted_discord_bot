@@ -1,7 +1,7 @@
-const { Client, GatewayIntentBits, Collection, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder, ComponentType } = require('discord.js');
 const { loadCommands } = require('./commands/loader');
 const { addSearch, getSearches, removeSearch } = require('./vinted');
-const { upsertPreset, getPreset, listPresetTitles } = require('./utils/userPresets');
+const { upsertPreset, getPreset, listPresetTitles, deletePreset } = require('./utils/userPresets');
 
 const client = new Client({
   intents: [
@@ -90,15 +90,49 @@ client.on('interactionCreate', async (interaction) => {
         .setStyle(TextInputStyle.Short)
         .setPlaceholder('ex: 10');
 
+      const channelIdInput = new TextInputBuilder()
+        .setCustomId('preset_channel_id')
+        .setLabel('ID du salon pour les notifications')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('ex: 123456789012345678')
+        .setRequired(true);
+
       modal.addComponents(
         new ActionRowBuilder().addComponents(titleInput),
         new ActionRowBuilder().addComponents(queriesInput),
         new ActionRowBuilder().addComponents(priceMinInput),
         new ActionRowBuilder().addComponents(priceMaxInput),
         new ActionRowBuilder().addComponents(minEvalInput),
+        new ActionRowBuilder().addComponents(channelIdInput),
       );
 
       return interaction.showModal(modal);
+    }
+
+    if (interaction.customId === 'use_preset') {
+      const titles = listPresetTitles(interaction.user.id);
+      if (titles.length === 0) {
+        return interaction.reply({ content: 'ℹ️ Aucun preset trouvé pour vous.', flags: 64 });
+      }
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId('use_preset_select')
+        .setPlaceholder('Sélectionnez un preset')
+        .addOptions(titles.slice(0, 25).map(t => ({ label: t.slice(0, 100), value: t })));
+      const row = new ActionRowBuilder().addComponents(menu);
+      return interaction.reply({ content: 'Choisissez un preset à utiliser:', components: [row], flags: 64 });
+    }
+
+    if (interaction.customId === 'edit_preset') {
+      const titles = listPresetTitles(interaction.user.id);
+      if (titles.length === 0) {
+        return interaction.reply({ content: 'ℹ️ Aucun preset à modifier.', flags: 64 });
+      }
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId('edit_preset_select')
+        .setPlaceholder('Sélectionnez un preset à modifier/supprimer')
+        .addOptions(titles.slice(0, 25).map(t => ({ label: t.slice(0, 100), value: t })));
+      const row = new ActionRowBuilder().addComponents(menu);
+      return interaction.reply({ content: 'Choisissez un preset:', components: [row], flags: 64 });
     }
   }
 
@@ -108,6 +142,17 @@ client.on('interactionCreate', async (interaction) => {
     const priceMin = interaction.fields.getTextInputValue('preset_price_min').trim();
     const priceMax = interaction.fields.getTextInputValue('preset_price_max').trim();
     const minEval = interaction.fields.getTextInputValue('preset_min_eval').trim();
+    const targetChannelId = interaction.fields.getTextInputValue('preset_channel_id').trim();
+
+    // Validate channel
+    try {
+      const ch = await interaction.guild.channels.fetch(targetChannelId);
+      if (!ch) {
+        return interaction.reply({ content: '❌ Salon invalide.', flags: 64 });
+      }
+    } catch {
+      return interaction.reply({ content: '❌ ID de salon introuvable.', flags: 64 });
+    }
 
     const queries = queriesRaw.split(',').map(s => s.trim()).filter(Boolean);
     if (queries.length === 0) {
@@ -121,19 +166,20 @@ client.on('interactionCreate', async (interaction) => {
       priceMin: priceMin || null,
       priceMax: priceMax || null,
       minEvaluations: minEval || null,
-      channelId: interaction.channelId,
+      channelId: targetChannelId,
+      ownerId: interaction.user.id,
       createdAt: Date.now(),
     };
-    upsertPreset(title, presetData);
+    upsertPreset(interaction.user.id, title, presetData);
 
     // Nettoie les recherches existantes de ce salon
-    const existing = getSearches(interaction.channelId);
+    const existing = getSearches(targetChannelId);
     for (const s of existing) removeSearch(s.id);
 
     // Crée les recherches
     const createdIds = [];
     for (const q of queries) {
-      const id = addSearch(interaction.channelId, {
+      const id = addSearch(targetChannelId, {
         keyword: q,
         priceMin: presetData.priceMin,
         priceMax: presetData.priceMax,
@@ -142,7 +188,92 @@ client.on('interactionCreate', async (interaction) => {
       createdIds.push(id);
     }
 
-    return interaction.reply({ content: `✅ Preset \`${title}\` créé (${queries.length} recherche(s)). IDs: ${createdIds.map(x => '\`'+x+'\`').join(', ')}`, ephemeral: true });
+    return interaction.reply({ content: `✅ Preset \`${title}\` créé (${queries.length} recherche(s)). IDs: ${createdIds.map(x => '\`'+x+'\`').join(', ')}`, flags: 64 });
+  }
+
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'use_preset_select') {
+      const title = interaction.values[0];
+      const preset = getPreset(interaction.user.id, title);
+      if (!preset) return interaction.reply({ content: '❌ Preset introuvable.', flags: 64 });
+      // Nettoie le salon cible puis crée
+      const existing = getSearches(preset.channelId);
+      for (const s of existing) removeSearch(s.id);
+      const createdIds = [];
+      for (const q of preset.queries) {
+        const id = addSearch(preset.channelId, {
+          keyword: q,
+          priceMin: preset.priceMin,
+          priceMax: preset.priceMax,
+          minEvaluations: preset.minEvaluations,
+        });
+        createdIds.push(id);
+      }
+      return interaction.update({ content: `✅ Preset \`${title}\` utilisé. IDs: ${createdIds.map(x => '\`'+x+'\`').join(', ')}`, components: [], flags: 64 });
+    }
+
+    if (interaction.customId === 'edit_preset_select') {
+      const title = interaction.values[0];
+      const preset = getPreset(interaction.user.id, title);
+      if (!preset) return interaction.reply({ content: '❌ Preset introuvable.', flags: 64 });
+
+      const modal = new ModalBuilder()
+        .setCustomId(`edit_preset_modal::${title}`)
+        .setTitle('Modifier la configuration');
+
+      const titleInput = new TextInputBuilder().setCustomId('preset_title').setLabel('Titre du bot').setStyle(TextInputStyle.Short).setValue(title).setRequired(true);
+      const queriesInput = new TextInputBuilder().setCustomId('preset_queries').setLabel('Recherches (virgules)').setStyle(TextInputStyle.Paragraph).setValue(preset.queries.join(', ')).setRequired(true);
+      const priceMinInput = new TextInputBuilder().setCustomId('preset_price_min').setLabel('Prix min').setStyle(TextInputStyle.Short).setValue(preset.priceMin || '').setRequired(false);
+      const priceMaxInput = new TextInputBuilder().setCustomId('preset_price_max').setLabel('Prix max').setStyle(TextInputStyle.Short).setValue(preset.priceMax || '').setRequired(false);
+      const minEvalInput = new TextInputBuilder().setCustomId('preset_min_eval').setLabel('Min évaluations').setStyle(TextInputStyle.Short).setValue(preset.minEvaluations || '').setRequired(false);
+      const channelIdInput = new TextInputBuilder().setCustomId('preset_channel_id').setLabel('ID du salon').setStyle(TextInputStyle.Short).setValue(preset.channelId || '').setRequired(true);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(titleInput),
+        new ActionRowBuilder().addComponents(queriesInput),
+        new ActionRowBuilder().addComponents(priceMinInput),
+        new ActionRowBuilder().addComponents(priceMaxInput),
+        new ActionRowBuilder().addComponents(minEvalInput),
+        new ActionRowBuilder().addComponents(channelIdInput),
+      );
+
+      return interaction.showModal(modal);
+    }
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('edit_preset_modal::')) {
+    const oldTitle = interaction.customId.split('::')[1];
+    const title = interaction.fields.getTextInputValue('preset_title').trim();
+    const queriesRaw = interaction.fields.getTextInputValue('preset_queries');
+    const priceMin = interaction.fields.getTextInputValue('preset_price_min').trim();
+    const priceMax = interaction.fields.getTextInputValue('preset_price_max').trim();
+    const minEval = interaction.fields.getTextInputValue('preset_min_eval').trim();
+    const targetChannelId = interaction.fields.getTextInputValue('preset_channel_id').trim();
+
+    const queries = queriesRaw.split(',').map(s => s.trim()).filter(Boolean);
+    if (queries.length === 0) return interaction.reply({ content: '❌ Aucune recherche fournie.', flags: 64 });
+
+    // Validate channel
+    try {
+      const ch = await interaction.guild.channels.fetch(targetChannelId);
+      if (!ch) return interaction.reply({ content: '❌ Salon invalide.', flags: 64 });
+    } catch { return interaction.reply({ content: '❌ ID de salon introuvable.', flags: 64 }); }
+
+    // Si le titre change, on supprime l'ancien
+    if (oldTitle !== title) deletePreset(interaction.user.id, oldTitle);
+
+    upsertPreset(interaction.user.id, title, {
+      title,
+      queries,
+      priceMin: priceMin || null,
+      priceMax: priceMax || null,
+      minEvaluations: minEval || null,
+      channelId: targetChannelId,
+      ownerId: interaction.user.id,
+      updatedAt: Date.now(),
+    });
+
+    return interaction.reply({ content: `✅ Preset \`${title}\` enregistré.`, flags: 64 });
   }
 });
 
@@ -154,9 +285,11 @@ async function publishControlPanel() {
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('create_preset').setLabel('Créer').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('use_preset').setLabel('Utiliser').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('edit_preset').setLabel('Modifier').setStyle(ButtonStyle.Secondary),
     );
 
-    await controlChannel.send({ content: 'Créer une configuration de bot pour ce salon:', components: [row] });
+    await controlChannel.send({ content: 'Gérer vos configurations de bot pour ce salon:', components: [row] });
   }
 }
 

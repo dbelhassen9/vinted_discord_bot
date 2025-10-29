@@ -10,7 +10,9 @@ function createHttpClient(currentJar) {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
       'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+      'Accept-Encoding': 'gzip, deflate, br',
       'Connection': 'keep-alive',
+      'Upgrade-Insecure-Requests': '1',
       'Sec-Fetch-Dest': 'document',
       'Sec-Fetch-Mode': 'navigate',
       'Sec-Fetch-Site': 'none',
@@ -69,12 +71,32 @@ function getApiClient() {
   return client;
 }
 
-function getApiHeaders() {
+function buildSearchReferer(config = {}) {
+  const params = new URLSearchParams();
+  if (config.keyword) params.append('search_text', config.keyword);
+  if (config.priceMin) params.append('price_from', config.priceMin);
+  if (config.priceMax) params.append('price_to', config.priceMax);
+  if (config.categoryId) params.append('catalog_ids', config.categoryId);
+  if (config.brandId) params.append('brand_ids', config.brandId);
+  if (config.sizeId) params.append('size_ids', config.sizeId);
+  params.append('order', 'newest_first');
+  params.append('page', '1');
+  return `https://www.vinted.fr/vetements?${params.toString()}`;
+}
+
+function getApiHeaders(config = {}) {
   return {
     'Accept': 'application/json, text/plain, */*',
-    'Referer': 'https://www.vinted.fr/',
+    'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Cache-Control': 'no-cache',
+    'Pragma': 'no-cache',
+    'Referer': buildSearchReferer(config),
     'Origin': 'https://www.vinted.fr',
     'X-Requested-With': 'XMLHttpRequest',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
     ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
   };
 }
@@ -98,6 +120,7 @@ module.exports = {
   getApiClient,
   getApiHeaders,
   initVintedSession,
+  buildSearchReferer,
 };
 
 

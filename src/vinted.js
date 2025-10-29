@@ -118,8 +118,7 @@ async function fetchVintedItems(config) {
     try {
       const response = await client.get(url, {
         headers: {
-          ...getApiHeaders(),
-          'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+          ...getApiHeaders(config),
         },
         timeout: 20000,
       });
@@ -132,14 +131,14 @@ async function fetchVintedItems(config) {
       lastError = error;
       const status = error.response?.status;
       if (status === 401 || status === 403) {
-        // Si 403, on fait un reset et on retry une fois, sinon on abandonne l'API
+        // Si 401/403, on fait un reset et on retry une fois, sinon on abandonne l'API
         if (attempt === 0) {
-          console.warn('Erreur 403, réinitialisation session...');
+          console.warn('Erreur 401/403, réinitialisation session...');
           await resetSession();
         }
         attempt += 1;
         if (attempt >= maxAttempts) {
-          console.warn('API bloquée (403), utilisation uniquement méthode HTML.');
+          console.warn('API bloquée (401/403), utilisation uniquement méthode HTML.');
           return [];
         }
         continue;
@@ -176,10 +175,14 @@ async function fetchVintedItemsFromHtml(client, config) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Referer': 'https://www.vinted.fr/',
         'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'same-origin',
         'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
       },
       timeout: 20000,
     });
@@ -218,6 +221,10 @@ async function fetchVintedItemsFromHtml(client, config) {
     
     return Array.isArray(items) ? items : [];
   } catch (e) {
+    if (e.response?.status === 401 || e.response?.status === 403) {
+      console.warn('HTML bloqué (401/403), réinitialisation session...');
+      await resetSession();
+    }
     console.warn('Erreur extraction HTML:', e.message);
     return [];
   }

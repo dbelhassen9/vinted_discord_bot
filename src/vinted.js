@@ -237,6 +237,14 @@ function matchesFilters(item, config) {
     }
   }
   
+  // Filtre: nombre minimum d'évaluations du vendeur
+  if (config.minEvaluations) {
+    const count = item.user?.feedback_count || item.user?.feedbacks_count || 0;
+    if (count < parseInt(config.minEvaluations, 10)) {
+      return false;
+    }
+  }
+  
   return true;
 }
 

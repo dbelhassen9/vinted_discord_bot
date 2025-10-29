@@ -1,7 +1,7 @@
-const { Client, GatewayIntentBits, Collection, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { Client, GatewayIntentBits, Collection, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const { loadCommands } = require('./commands/loader');
-const { PRESETS, DEFAULT_CHANNELS_BY_PRESET } = require('./config/presets');
 const { addSearch, getSearches, removeSearch } = require('./vinted');
+const { upsertPreset, getPreset, listPresetTitles } = require('./utils/userPresets');
 
 const client = new Client({
   intents: [
@@ -52,38 +52,97 @@ client.on('messageCreate', async (message) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isButton()) return;
-  const { customId } = interaction;
-  if (customId !== 'preset_reshiram' && customId !== 'preset_zekrom') return;
+  if (interaction.isButton()) {
+    if (interaction.customId === 'create_preset') {
+      const modal = new ModalBuilder()
+        .setCustomId('create_preset_modal')
+        .setTitle('Créer une configuration de bot');
 
-  const presetKey = customId === 'preset_reshiram' ? 'reshiram' : 'zekrom';
-  const preset = PRESETS[presetKey];
-  const channelsByPreset = DEFAULT_CHANNELS_BY_PRESET[presetKey];
+      const titleInput = new TextInputBuilder()
+        .setCustomId('preset_title')
+        .setLabel('Titre du bot (nom de preset)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('ex: black_white_bundle')
+        .setRequired(true);
 
-  try {
-    const guild = interaction.guild;
-    const bundleChannel = guild.channels.cache.find(c => c.name === channelsByPreset.bundle);
-    const etbChannel = guild.channels.cache.find(c => c.name === channelsByPreset.etb);
-    if (!bundleChannel || !etbChannel) {
-      return interaction.reply({ content: `❌ Salons introuvables. Créez \`${channelsByPreset.bundle}\` et \`${channelsByPreset.etb}\`.`, ephemeral: true });
+      const queriesInput = new TextInputBuilder()
+        .setCustomId('preset_queries')
+        .setLabel('Recherches récurrentes (séparées par des virgules)')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('ex: bundle flamme blanche, etb reshiram, bundle foudre noire')
+        .setRequired(true);
+
+      const priceMinInput = new TextInputBuilder()
+        .setCustomId('preset_price_min')
+        .setLabel('Prix minimum (optionnel)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('ex: 30');
+
+      const priceMaxInput = new TextInputBuilder()
+        .setCustomId('preset_price_max')
+        .setLabel('Prix maximum (optionnel)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('ex: 60');
+
+      const minEvalInput = new TextInputBuilder()
+        .setCustomId('preset_min_eval')
+        .setLabel('Nombre min. d’évaluations (optionnel)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('ex: 10');
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(titleInput),
+        new ActionRowBuilder().addComponents(queriesInput),
+        new ActionRowBuilder().addComponents(priceMinInput),
+        new ActionRowBuilder().addComponents(priceMaxInput),
+        new ActionRowBuilder().addComponents(minEvalInput),
+      );
+
+      return interaction.showModal(modal);
+    }
+  }
+
+  if (interaction.isModalSubmit() && interaction.customId === 'create_preset_modal') {
+    const title = interaction.fields.getTextInputValue('preset_title').trim();
+    const queriesRaw = interaction.fields.getTextInputValue('preset_queries');
+    const priceMin = interaction.fields.getTextInputValue('preset_price_min').trim();
+    const priceMax = interaction.fields.getTextInputValue('preset_price_max').trim();
+    const minEval = interaction.fields.getTextInputValue('preset_min_eval').trim();
+
+    const queries = queriesRaw.split(',').map(s => s.trim()).filter(Boolean);
+    if (queries.length === 0) {
+      return interaction.reply({ content: '❌ Aucune recherche fournie.', ephemeral: true });
     }
 
-    for (const channel of [bundleChannel, etbChannel]) {
-      const existing = getSearches(channel.id);
-      for (const s of existing) {
-        removeSearch(s.id);
-      }
+    // Enregistrer le preset
+    const presetData = {
+      title,
+      queries,
+      priceMin: priceMin || null,
+      priceMax: priceMax || null,
+      minEvaluations: minEval || null,
+      channelId: interaction.channelId,
+      createdAt: Date.now(),
+    };
+    upsertPreset(title, presetData);
+
+    // Nettoie les recherches existantes de ce salon
+    const existing = getSearches(interaction.channelId);
+    for (const s of existing) removeSearch(s.id);
+
+    // Crée les recherches
+    const createdIds = [];
+    for (const q of queries) {
+      const id = addSearch(interaction.channelId, {
+        keyword: q,
+        priceMin: presetData.priceMin,
+        priceMax: presetData.priceMax,
+        minEvaluations: presetData.minEvaluations,
+      });
+      createdIds.push(id);
     }
 
-    const bundleId = addSearch(bundleChannel.id, { keyword: preset.searches.bundle.keyword });
-    const etbId = addSearch(etbChannel.id, { keyword: preset.searches.etb.keyword });
-
-    await interaction.reply({ content: `✅ ${preset.label} activé\n• ${channelsByPreset.bundle}: \`${preset.searches.bundle.keyword}\` (id: ${bundleId})\n• ${channelsByPreset.etb}: \`${preset.searches.etb.keyword}\` (id: ${etbId})`, ephemeral: true });
-  } catch (error) {
-    console.error('Erreur preset:', error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Erreur lors de l\'activation du preset.', ephemeral: true });
-    }
+    return interaction.reply({ content: `✅ Preset \`${title}\` créé (${queries.length} recherche(s)). IDs: ${createdIds.map(x => '\`'+x+'\`').join(', ')}`, ephemeral: true });
   }
 });
 
@@ -94,11 +153,10 @@ async function publishControlPanel() {
     if (!controlChannel) continue;
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('preset_reshiram').setLabel('Reshiram').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('preset_zekrom').setLabel('Zekrom').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('create_preset').setLabel('Créer').setStyle(ButtonStyle.Primary),
     );
 
-    await controlChannel.send({ content: 'Sélectionne un preset pour activer les recherches:', components: [row] });
+    await controlChannel.send({ content: 'Créer une configuration de bot pour ce salon:', components: [row] });
   }
 }
 

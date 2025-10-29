@@ -56,37 +56,37 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.customId === 'create_preset') {
       const modal = new ModalBuilder()
         .setCustomId('create_preset_modal')
-        .setTitle('Créer une configuration de bot');
+        .setTitle('Créer une configuration');
 
       const titleInput = new TextInputBuilder()
         .setCustomId('preset_title')
-        .setLabel('Titre du bot (nom de preset)')
+        .setLabel('Titre du bot')
         .setStyle(TextInputStyle.Short)
         .setPlaceholder('ex: black_white_bundle')
         .setRequired(true);
 
       const queriesInput = new TextInputBuilder()
         .setCustomId('preset_queries')
-        .setLabel('Recherches récurrentes (séparées par des virgules)')
+        .setLabel('Recherches (séparées par des virgules)')
         .setStyle(TextInputStyle.Paragraph)
-        .setPlaceholder('ex: bundle flamme blanche, etb reshiram, bundle foudre noire')
+        .setPlaceholder('ex: bundle flamme blanche, etb reshiram')
         .setRequired(true);
 
       const priceMinInput = new TextInputBuilder()
         .setCustomId('preset_price_min')
-        .setLabel('Prix minimum (optionnel)')
+        .setLabel('Prix min (optionnel)')
         .setStyle(TextInputStyle.Short)
         .setPlaceholder('ex: 30');
 
       const priceMaxInput = new TextInputBuilder()
         .setCustomId('preset_price_max')
-        .setLabel('Prix maximum (optionnel)')
+        .setLabel('Prix max (optionnel)')
         .setStyle(TextInputStyle.Short)
         .setPlaceholder('ex: 60');
 
       const minEvalInput = new TextInputBuilder()
         .setCustomId('preset_min_eval')
-        .setLabel('Nombre min. d’évaluations (optionnel)')
+        .setLabel('Min évaluations (optionnel)')
         .setStyle(TextInputStyle.Short)
         .setPlaceholder('ex: 10');
 

@@ -72,17 +72,11 @@ client.on('interactionCreate', async (interaction) => {
         .setPlaceholder('ex: bundle flamme blanche, etb reshiram')
         .setRequired(true);
 
-      const priceMinInput = new TextInputBuilder()
-        .setCustomId('preset_price_min')
-        .setLabel('Prix min (optionnel)')
+      const priceRangeInput = new TextInputBuilder()
+        .setCustomId('preset_price_range')
+        .setLabel('Prix min-max (optionnel)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('ex: 30');
-
-      const priceMaxInput = new TextInputBuilder()
-        .setCustomId('preset_price_max')
-        .setLabel('Prix max (optionnel)')
-        .setStyle(TextInputStyle.Short)
-        .setPlaceholder('ex: 60');
+        .setPlaceholder('ex: 30-60, 30-, -60');
 
       const minEvalInput = new TextInputBuilder()
         .setCustomId('preset_min_eval')
@@ -100,8 +94,7 @@ client.on('interactionCreate', async (interaction) => {
       modal.addComponents(
         new ActionRowBuilder().addComponents(titleInput),
         new ActionRowBuilder().addComponents(queriesInput),
-        new ActionRowBuilder().addComponents(priceMinInput),
-        new ActionRowBuilder().addComponents(priceMaxInput),
+        new ActionRowBuilder().addComponents(priceRangeInput),
         new ActionRowBuilder().addComponents(minEvalInput),
         new ActionRowBuilder().addComponents(channelIdInput),
       );
@@ -139,10 +132,14 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isModalSubmit() && interaction.customId === 'create_preset_modal') {
     const title = interaction.fields.getTextInputValue('preset_title').trim();
     const queriesRaw = interaction.fields.getTextInputValue('preset_queries');
-    const priceMin = interaction.fields.getTextInputValue('preset_price_min').trim();
-    const priceMax = interaction.fields.getTextInputValue('preset_price_max').trim();
+    const priceRange = interaction.fields.getTextInputValue('preset_price_range').trim();
     const minEval = interaction.fields.getTextInputValue('preset_min_eval').trim();
     const targetChannelId = interaction.fields.getTextInputValue('preset_channel_id').trim();
+    let priceMin = null, priceMax = null;
+    if (priceRange) {
+      const m = priceRange.match(/^\s*(\d+)?\s*-\s*(\d+)?\s*$/);
+      if (m) { priceMin = m[1] || null; priceMax = m[2] || null; }
+    }
 
     // Validate channel
     try {
@@ -163,8 +160,8 @@ client.on('interactionCreate', async (interaction) => {
     const presetData = {
       title,
       queries,
-      priceMin: priceMin || null,
-      priceMax: priceMax || null,
+      priceMin: priceMin,
+      priceMax: priceMax,
       minEvaluations: minEval || null,
       channelId: targetChannelId,
       ownerId: interaction.user.id,
@@ -193,7 +190,7 @@ client.on('interactionCreate', async (interaction) => {
 
   if (interaction.isStringSelectMenu()) {
     if (interaction.customId === 'use_preset_select') {
-      const title = interaction.values[0];
+    const title = interaction.values[0];
       const preset = getPreset(interaction.user.id, title);
       if (!preset) return interaction.reply({ content: '❌ Preset introuvable.', flags: 64 });
       // Nettoie le salon cible puis crée
@@ -223,16 +220,14 @@ client.on('interactionCreate', async (interaction) => {
 
       const titleInput = new TextInputBuilder().setCustomId('preset_title').setLabel('Titre du bot').setStyle(TextInputStyle.Short).setValue(title).setRequired(true);
       const queriesInput = new TextInputBuilder().setCustomId('preset_queries').setLabel('Recherches (virgules)').setStyle(TextInputStyle.Paragraph).setValue(preset.queries.join(', ')).setRequired(true);
-      const priceMinInput = new TextInputBuilder().setCustomId('preset_price_min').setLabel('Prix min').setStyle(TextInputStyle.Short).setValue(preset.priceMin || '').setRequired(false);
-      const priceMaxInput = new TextInputBuilder().setCustomId('preset_price_max').setLabel('Prix max').setStyle(TextInputStyle.Short).setValue(preset.priceMax || '').setRequired(false);
+      const priceRangeInput = new TextInputBuilder().setCustomId('preset_price_range').setLabel('Prix min-max').setStyle(TextInputStyle.Short).setValue((preset.priceMin||'') + '-' + (preset.priceMax||'')).setRequired(false);
       const minEvalInput = new TextInputBuilder().setCustomId('preset_min_eval').setLabel('Min évaluations').setStyle(TextInputStyle.Short).setValue(preset.minEvaluations || '').setRequired(false);
       const channelIdInput = new TextInputBuilder().setCustomId('preset_channel_id').setLabel('ID du salon').setStyle(TextInputStyle.Short).setValue(preset.channelId || '').setRequired(true);
 
       modal.addComponents(
         new ActionRowBuilder().addComponents(titleInput),
         new ActionRowBuilder().addComponents(queriesInput),
-        new ActionRowBuilder().addComponents(priceMinInput),
-        new ActionRowBuilder().addComponents(priceMaxInput),
+        new ActionRowBuilder().addComponents(priceRangeInput),
         new ActionRowBuilder().addComponents(minEvalInput),
         new ActionRowBuilder().addComponents(channelIdInput),
       );
@@ -245,10 +240,14 @@ client.on('interactionCreate', async (interaction) => {
     const oldTitle = interaction.customId.split('::')[1];
     const title = interaction.fields.getTextInputValue('preset_title').trim();
     const queriesRaw = interaction.fields.getTextInputValue('preset_queries');
-    const priceMin = interaction.fields.getTextInputValue('preset_price_min').trim();
-    const priceMax = interaction.fields.getTextInputValue('preset_price_max').trim();
+    const priceRange = interaction.fields.getTextInputValue('preset_price_range').trim();
     const minEval = interaction.fields.getTextInputValue('preset_min_eval').trim();
     const targetChannelId = interaction.fields.getTextInputValue('preset_channel_id').trim();
+    let priceMin = null, priceMax = null;
+    if (priceRange) {
+      const m = priceRange.match(/^\s*(\d+)?\s*-\s*(\d+)?\s*$/);
+      if (m) { priceMin = m[1] || null; priceMax = m[2] || null; }
+    }
 
     const queries = queriesRaw.split(',').map(s => s.trim()).filter(Boolean);
     if (queries.length === 0) return interaction.reply({ content: '❌ Aucune recherche fournie.', flags: 64 });
@@ -265,8 +264,8 @@ client.on('interactionCreate', async (interaction) => {
     upsertPreset(interaction.user.id, title, {
       title,
       queries,
-      priceMin: priceMin || null,
-      priceMax: priceMax || null,
+      priceMin: priceMin,
+      priceMax: priceMax,
       minEvaluations: minEval || null,
       channelId: targetChannelId,
       ownerId: interaction.user.id,

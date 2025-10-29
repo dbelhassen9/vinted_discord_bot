@@ -104,7 +104,14 @@ async function fetchVintedItems(config) {
   const client = getApiClient();
   const url = buildVintedUrl(config);
 
-  const maxAttempts = 3;
+  // Essayer d'abord la méthode HTML (plus fiable pour éviter les 403)
+  let items = await fetchVintedItemsFromHtml(client, config);
+  if (items && items.length > 0) {
+    return items;
+  }
+
+  // Fallback sur l'API si HTML ne donne rien
+  const maxAttempts = 2;
   let attempt = 0;
   let lastError = null;
   while (attempt < maxAttempts) {
@@ -114,28 +121,33 @@ async function fetchVintedItems(config) {
           ...getApiHeaders(),
           'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
         },
-        timeout: 15000,
+        timeout: 20000,
       });
-      let items = response.data?.items || [];
-      if (!Array.isArray(items) || items.length === 0) {
-        // Fallback: extraire les items depuis la page HTML publique
-        items = await fetchVintedItemsFromHtml(client, config);
+      items = response.data?.items || [];
+      if (Array.isArray(items) && items.length > 0) {
+        return items;
       }
-      return items;
+      break;
     } catch (error) {
       lastError = error;
       const status = error.response?.status;
       if (status === 401 || status === 403) {
-        // Session expirée → reset + retry
-        console.warn('Session Vinted expirée, reinitialisation...');
-        await resetSession();
+        // Si 403, on fait un reset et on retry une fois, sinon on abandonne l'API
+        if (attempt === 0) {
+          console.warn('Erreur 403, réinitialisation session...');
+          await resetSession();
+        }
         attempt += 1;
+        if (attempt >= maxAttempts) {
+          console.warn('API bloquée (403), utilisation uniquement méthode HTML.');
+          return [];
+        }
         continue;
       }
       // Backoff exponentiel sur erreurs réseau/5xx
       const isRetryable = !status || status >= 500;
-      if (isRetryable) {
-        const delay = Math.min(1000 * Math.pow(2, attempt), 5000);
+      if (isRetryable && attempt < maxAttempts - 1) {
+        const delay = Math.min(2000 * Math.pow(2, attempt), 8000);
         await new Promise(r => setTimeout(r, delay));
         attempt += 1;
         continue;
@@ -143,10 +155,9 @@ async function fetchVintedItems(config) {
       break;
     }
   }
-  if (lastError?.response) {
+  
+  if (lastError?.response && lastError.response.status !== 403) {
     console.error(`Erreur API Vinted (${lastError.response.status}): ${lastError.response.statusText}`);
-  } else if (lastError) {
-    console.error('Erreur lors de la récupération des articles Vinted:', lastError.message);
   }
   return [];
 }
@@ -165,21 +176,49 @@ async function fetchVintedItemsFromHtml(client, config) {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Referer': 'https://www.vinted.fr/',
         'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Sec-Fetch-User': '?1',
       },
-      timeout: 15000,
+      timeout: 20000,
     });
     const html = typeof res.data === 'string' ? res.data : '';
-    // Cherche un bloc JSON contenant "items":[...]
-    const match = html.match(/"items"\s*:\s*\[(\{[\s\S]*?\})\]/);
-    if (!match) return [];
-    const itemsJson = `[${match[1]}]`;
-    try {
-      const parsed = JSON.parse(itemsJson);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (_) {
-      return [];
+    
+    // Méthode 1: Chercher window.__INITIAL_STATE__ ou similaire avec items
+    let items = [];
+    const stateMatch = html.match(/window\.__INITIAL_STATE__\s*=\s*({[\s\S]*?});/);
+    if (stateMatch) {
+      try {
+        const state = JSON.parse(stateMatch[1]);
+        if (state?.items?.items) items = state.items.items;
+        else if (state?.catalog?.items) items = state.catalog.items;
+      } catch (_) {}
     }
+    
+    // Méthode 2: Chercher un bloc JSON contenant "items":[...]
+    if (!items || items.length === 0) {
+      const itemsMatch = html.match(/"items"\s*:\s*(\[[\s\S]{50,}\])/);
+      if (itemsMatch) {
+        try {
+          items = JSON.parse(itemsMatch[1]);
+        } catch (_) {}
+      }
+    }
+    
+    // Méthode 3: Chercher dans les données API embeddées
+    if (!items || items.length === 0) {
+      const apiMatch = html.match(/api\/v2\/catalog\/items[^"]*[\s\S]*?(\[[\s\S]{100,}\])/);
+      if (apiMatch) {
+        try {
+          items = JSON.parse(apiMatch[1]);
+        } catch (_) {}
+      }
+    }
+    
+    return Array.isArray(items) ? items : [];
   } catch (e) {
+    console.warn('Erreur extraction HTML:', e.message);
     return [];
   }
 }

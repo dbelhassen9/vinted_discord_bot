@@ -76,7 +76,7 @@ client.on('interactionCreate', async (interaction) => {
         .setCustomId('preset_price_range')
         .setLabel('Prix min-max (optionnel)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('ex: 30-60, 30-, -60');
+        .setPlaceholder('ex: 60-90, +60, -90');
 
       const minEvalInput = new TextInputBuilder()
         .setCustomId('preset_min_eval')
@@ -150,8 +150,15 @@ client.on('interactionCreate', async (interaction) => {
     const targetChannelId = interaction.fields.getTextInputValue('preset_channel_id').trim();
     let priceMin = null, priceMax = null;
     if (priceRange) {
-      const m = priceRange.match(/^(\d+)?\s*-\s*(\d+)?$/);
-      if (m) { priceMin = m[1] || null; priceMax = m[2] || null; }
+      const trimmed = priceRange.trim();
+      if (trimmed.startsWith('+')) {
+        priceMin = trimmed.slice(1).trim();
+      } else if (trimmed.startsWith('-')) {
+        priceMax = trimmed.slice(1).trim();
+      } else {
+        const m = trimmed.match(/^(\d+)?\s*-\s*(\d+)?$/);
+        if (m) { priceMin = m[1] || null; priceMax = m[2] || null; }
+      }
     }
 
     // Validate channel
@@ -233,7 +240,10 @@ client.on('interactionCreate', async (interaction) => {
 
       const titleInput = new TextInputBuilder().setCustomId('preset_title').setLabel('Titre du bot').setStyle(TextInputStyle.Short).setValue(title).setRequired(true);
       const queriesInput = new TextInputBuilder().setCustomId('preset_queries').setLabel('Recherches (virgules)').setStyle(TextInputStyle.Paragraph).setValue(preset.queries.join(', ')).setRequired(true);
-      const priceRangeInput = new TextInputBuilder().setCustomId('preset_price_range').setLabel('Prix min-max').setStyle(TextInputStyle.Short).setValue(`${preset.priceMin||''}-${preset.priceMax||''}`).setRequired(false);
+      const priceRangeValue = preset.priceMin && preset.priceMax ? `${preset.priceMin}-${preset.priceMax}` : 
+                               preset.priceMin ? `+${preset.priceMin}` : 
+                               preset.priceMax ? `-${preset.priceMax}` : '';
+      const priceRangeInput = new TextInputBuilder().setCustomId('preset_price_range').setLabel('Prix min-max').setStyle(TextInputStyle.Short).setValue(priceRangeValue).setRequired(false);
       const minEvalInput = new TextInputBuilder().setCustomId('preset_min_eval').setLabel('Min évaluations').setStyle(TextInputStyle.Short).setValue(preset.minEvaluations || '').setRequired(false);
       const channelIdInput = new TextInputBuilder().setCustomId('preset_channel_id').setLabel('ID du salon').setStyle(TextInputStyle.Short).setValue(preset.channelId || '').setRequired(true);
 
@@ -267,8 +277,15 @@ client.on('interactionCreate', async (interaction) => {
     const targetChannelId = interaction.fields.getTextInputValue('preset_channel_id').trim();
     let priceMin = null, priceMax = null;
     if (priceRange) {
-      const m = priceRange.match(/^(\d+)?\s*-\s*(\d+)?$/);
-      if (m) { priceMin = m[1] || null; priceMax = m[2] || null; }
+      const trimmed = priceRange.trim();
+      if (trimmed.startsWith('+')) {
+        priceMin = trimmed.slice(1).trim();
+      } else if (trimmed.startsWith('-')) {
+        priceMax = trimmed.slice(1).trim();
+      } else {
+        const m = trimmed.match(/^(\d+)?\s*-\s*(\d+)?$/);
+        if (m) { priceMin = m[1] || null; priceMax = m[2] || null; }
+      }
     }
 
     const queries = queriesRaw.split(',').map(s => s.trim()).filter(Boolean);

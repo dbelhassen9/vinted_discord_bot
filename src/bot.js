@@ -72,11 +72,17 @@ client.on('interactionCreate', async (interaction) => {
         .setPlaceholder('ex: bundle flamme blanche, etb reshiram')
         .setRequired(true);
 
-      const filtersInput = new TextInputBuilder()
-        .setCustomId('preset_filters')
-        .setLabel('Filtres (optionnel)')
+      const priceRangeInput = new TextInputBuilder()
+        .setCustomId('preset_price_range')
+        .setLabel('Prix min-max (optionnel)')
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder('ex: 30-60; eval>=10');
+        .setPlaceholder('ex: 30-60, 30-, -60');
+
+      const minEvalInput = new TextInputBuilder()
+        .setCustomId('preset_min_eval')
+        .setLabel('Min évaluations (optionnel)')
+        .setStyle(TextInputStyle.Short)
+        .setPlaceholder('ex: 10');
 
       const channelIdInput = new TextInputBuilder()
         .setCustomId('preset_channel_id')
@@ -88,7 +94,8 @@ client.on('interactionCreate', async (interaction) => {
       modal.addComponents(
         new ActionRowBuilder().addComponents(titleInput),
         new ActionRowBuilder().addComponents(queriesInput),
-        new ActionRowBuilder().addComponents(filtersInput),
+        new ActionRowBuilder().addComponents(priceRangeInput),
+        new ActionRowBuilder().addComponents(minEvalInput),
         new ActionRowBuilder().addComponents(channelIdInput),
       );
 
@@ -120,19 +127,31 @@ client.on('interactionCreate', async (interaction) => {
       const row = new ActionRowBuilder().addComponents(menu);
       return interaction.reply({ content: 'Choisissez un preset:', components: [row], flags: 64 });
     }
+
+    if (interaction.customId === 'stop_preset') {
+      const titles = listPresetTitles(interaction.user.id);
+      if (titles.length === 0) {
+        return interaction.reply({ content: 'ℹ️ Aucun preset à arrêter.', flags: 64 });
+      }
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId('stop_preset_select')
+        .setPlaceholder('Sélectionnez un preset à arrêter')
+        .addOptions(titles.slice(0, 25).map(t => ({ label: t.slice(0, 100), value: t })));
+      const row = new ActionRowBuilder().addComponents(menu);
+      return interaction.reply({ content: 'Quel preset arrêter ?', components: [row], flags: 64 });
+    }
   }
 
   if (interaction.isModalSubmit() && interaction.customId === 'create_preset_modal') {
     const title = interaction.fields.getTextInputValue('preset_title').trim();
     const queriesRaw = interaction.fields.getTextInputValue('preset_queries');
-    const filters = interaction.fields.getTextInputValue('preset_filters').trim();
+    const priceRange = interaction.fields.getTextInputValue('preset_price_range').trim();
+    const minEval = interaction.fields.getTextInputValue('preset_min_eval').trim();
     const targetChannelId = interaction.fields.getTextInputValue('preset_channel_id').trim();
-    let priceMin = null, priceMax = null, minEval = null;
-    if (filters) {
-      const range = filters.match(/(\d+)?\s*-\s*(\d+)?/);
-      if (range) { priceMin = range[1] || null; priceMax = range[2] || null; }
-      const me = filters.match(/eval\s*>=\s*(\d+)/i);
-      if (me) { minEval = me[1]; }
+    let priceMin = null, priceMax = null;
+    if (priceRange) {
+      const m = priceRange.match(/^(\d+)?\s*-\s*(\d+)?$/);
+      if (m) { priceMin = m[1] || null; priceMax = m[2] || null; }
     }
 
     // Validate channel
@@ -214,17 +233,28 @@ client.on('interactionCreate', async (interaction) => {
 
       const titleInput = new TextInputBuilder().setCustomId('preset_title').setLabel('Titre du bot').setStyle(TextInputStyle.Short).setValue(title).setRequired(true);
       const queriesInput = new TextInputBuilder().setCustomId('preset_queries').setLabel('Recherches (virgules)').setStyle(TextInputStyle.Paragraph).setValue(preset.queries.join(', ')).setRequired(true);
-      const filtersInput = new TextInputBuilder().setCustomId('preset_filters').setLabel('Filtres (min-max; eval>=)').setStyle(TextInputStyle.Short).setValue(`${preset.priceMin||''}-${preset.priceMax||''}${preset.minEvaluations?`; eval>=${preset.minEvaluations}`:''}`).setRequired(false);
+      const priceRangeInput = new TextInputBuilder().setCustomId('preset_price_range').setLabel('Prix min-max').setStyle(TextInputStyle.Short).setValue(`${preset.priceMin||''}-${preset.priceMax||''}`).setRequired(false);
+      const minEvalInput = new TextInputBuilder().setCustomId('preset_min_eval').setLabel('Min évaluations').setStyle(TextInputStyle.Short).setValue(preset.minEvaluations || '').setRequired(false);
       const channelIdInput = new TextInputBuilder().setCustomId('preset_channel_id').setLabel('ID du salon').setStyle(TextInputStyle.Short).setValue(preset.channelId || '').setRequired(true);
 
       modal.addComponents(
         new ActionRowBuilder().addComponents(titleInput),
         new ActionRowBuilder().addComponents(queriesInput),
-        new ActionRowBuilder().addComponents(filtersInput),
+        new ActionRowBuilder().addComponents(priceRangeInput),
+        new ActionRowBuilder().addComponents(minEvalInput),
         new ActionRowBuilder().addComponents(channelIdInput),
       );
 
       return interaction.showModal(modal);
+    }
+
+    if (interaction.customId === 'stop_preset_select') {
+      const title = interaction.values[0];
+      const preset = getPreset(interaction.user.id, title);
+      if (!preset) return interaction.reply({ content: '❌ Preset introuvable.', flags: 64 });
+      const existing = getSearches(preset.channelId);
+      for (const s of existing) removeSearch(s.id);
+      return interaction.update({ content: `🛑 Recherches arrêtées pour \`${title}\` dans <#${preset.channelId}>.`, components: [], flags: 64 });
     }
   }
 
@@ -232,14 +262,13 @@ client.on('interactionCreate', async (interaction) => {
     const oldTitle = interaction.customId.split('::')[1];
     const title = interaction.fields.getTextInputValue('preset_title').trim();
     const queriesRaw = interaction.fields.getTextInputValue('preset_queries');
-    const filters = interaction.fields.getTextInputValue('preset_filters').trim();
+    const priceRange = interaction.fields.getTextInputValue('preset_price_range').trim();
+    const minEval = interaction.fields.getTextInputValue('preset_min_eval').trim();
     const targetChannelId = interaction.fields.getTextInputValue('preset_channel_id').trim();
-    let priceMin = null, priceMax = null, minEval = null;
-    if (filters) {
-      const range = filters.match(/(\d+)?\s*-\s*(\d+)?/);
-      if (range) { priceMin = range[1] || null; priceMax = range[2] || null; }
-      const me = filters.match(/eval\s*>=\s*(\d+)/i);
-      if (me) { minEval = me[1]; }
+    let priceMin = null, priceMax = null;
+    if (priceRange) {
+      const m = priceRange.match(/^(\d+)?\s*-\s*(\d+)?$/);
+      if (m) { priceMin = m[1] || null; priceMax = m[2] || null; }
     }
 
     const queries = queriesRaw.split(',').map(s => s.trim()).filter(Boolean);
@@ -279,6 +308,7 @@ async function publishControlPanel() {
       new ButtonBuilder().setCustomId('create_preset').setLabel('Créer').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('use_preset').setLabel('Utiliser').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('edit_preset').setLabel('Modifier').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('stop_preset').setLabel('Stop').setStyle(ButtonStyle.Danger),
     );
 
     await controlChannel.send({ content: 'Gérer vos configurations de bot pour ce salon:', components: [row] });

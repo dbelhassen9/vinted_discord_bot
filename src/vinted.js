@@ -205,11 +205,12 @@ function matchesFilters(item, config) {
     const synonyms = new Map([
       ['pokemon', ['pokemon', 'pokémon']],
       ['bundle', ['bundle', 'lot', 'coffret']],
+      ['etb', ['etb', 'elite trainer box', 'elite-trainer-box', 'coffret dresseur', 'coffret dresseur delite', 'coffret dresseur d elite', 'coffret dresseur d’élite', 'box']],
       ['boosters', ['boosters', 'booster']],
       ['flamme', ['flamme']],
-      ['blanche', ['blanche']],
+      ['blanche', ['blanche', 'blanc']],
       ['foudre', ['foudre']],
-      ['noire', ['noire']],
+      ['noire', ['noire', 'noir']],
     ]);
 
     // Règle: tous les tokens doivent être présents via eux-mêmes ou un synonyme
